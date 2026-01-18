@@ -1,0 +1,239 @@
+﻿The Master Build Prompt
+Instructions: Paste the text below into your AI coding partner.
+Persona: You are a Principal Software Engineer and AI Architect specializing in Chrome Manifest V3 and Semantic Reasoning.
+Project Goal: Build "Job-Agent AI," a production-ready, local-first Chrome Extension that automates complex job applications using the Gemini 3 API.
+Core Architecture Requirements:
+1. Zero-Mock Policy: Absolutely no hardcoded data, placeholders, or mock event handlers. Everything must be dynamic and driven by chrome.storage.local.
+2. Security: Use a "Bring Your Own Key" (BYOK) model. Store all PII (Resume, DOB, Demographics) locally.
+3. The Logic Engine (2026 Standards):
+   * Age Logic: Calculate current age from DOB against today’s date (Jan 16, 2026) and map to dynamic brackets (e.g., "36-45").
+   * Employment Cross-Referencer: Scrape the current site's name (e.g., "DoorDash"). If it appears in the user's resume work history, select "Yes" for "Have you ever worked here?"
+   * Demographic Mapping: Match profile data (Race, Gender, Disability, Veteran Status, Sexual Orientation) to dropdown/radio labels.
+   * Legal Logic: Answer "Sponsorship" and "Work Authorization" questions based on citizenship status.
+   * STAR Narrative: Generate 3-5 sentence behavioral responses using the Situation-Task-Action-Result framework.
+4. Input Handling: Support Radios, Checkboxes (Multi-select), Selects (Dropdowns), and Text inputs. Trigger input, change, and blur events to ensure React/Vue compatibility.
+5. CORS Resolution: All AI API calls must occur in background.js to bypass cross-origin restrictions.
+Instructions: Build the system in phases. Start by providing the manifest.json and the background.js routing logic.
+________________
+The Developer’s Reference & Guardrail Guide
+Instructions: Save this as DEVELOPER_GUIDE.md in your project folder. It keeps the AI builder "in check."
+I. Semantic Logic Definitions
+* The Age Calculation Formula: $Age = 2026 - Year_{birth}$. If current month/day < birth month/day, subtract 1.
+* The "DoorDash" Employment Logic: Extract the company name from meta property="og:site_name" or document.title. If any word in the company name exists as a "Company" key in the user's parsed resume history, the answer to "Previously employed?" is TRUE.
+* Demographic Fuzzy Matching: If the form asks "Race" but the profile says "Ethnicity," use semantic embedding logic to match values (e.g., "Caucasian" $\rightarrow$ "White").
+II. Technical Constraints
+* Shadow DOM Piercing: The content.js must use a recursive function to find inputs hidden inside Shadow Roots.
+* Acknowledgment Detection: Automatically check boxes where labels contain keywords: "I certify," "I agree," "Acknowledgment," "Terms of Service."
+* PII Privacy: Never log the user's resume or API key to the console.
+III. Installation & Dependency Manifest
+* Manifest Version: 3
+* Permissions Required: storage, activeTab, scripting, sidePanel.
+* Host Permissions: https://generativelanguage.googleapis.com/* (Crucial for CORS).
+* Engine: Gemini 1.5 Flash (for speed/logic) and Gemini 1.5/3 Pro (for STAR narratives).
+________________
+System Guidelines for Chatbot Gamification
+Instructions: Save this as CHATBOT_GUIDELINES.md. This acts as the "Source of Truth" to prevent the AI from hallucinating or losing its "personality."
+I. Personality Definitions & Guardrails
+Feature
+	The Resume Architect
+	The Career Strategist
+	Activation Trigger
+	Formatting issues, typos, passive voice, or poor layout.
+	High-quality structure, but missing role-specific keywords or certs.
+	Communication Style
+	Instructional, detail-oriented, supportive.
+	Analytical, industry-focused, visionary.
+	Primary Directive
+	Fix the document. "Let's get this ATS-ready."
+	Level up the candidate. "Let's make you the top 1%."
+	Success Metric
+	A clean, error-free resume upload.
+	An updated resume containing recommended skills or certs.
+	II. The "In-Chat" Re-Audit Logic
+* Detection: When the onChange event fires for the re-upload input, the FileHandler must extract the text.
+* Context Comparison: The new text is sent to the AI with the prompt: "I have made changes. Compare this new version to the previous one and tell me if I have met your previous goal."
+* Response: The AI must acknowledge specific changes (e.g., "I see you fixed the date formatting in your last role—great job!") before setting the next objective.
+III. Skills-Gap & Recommendation Logic
+* Contextual Awareness: If the user is on a job application page, the Strategist must scrape the "Requirements" section.
+* Gap Analysis: Compare requirements to the resume.
+* Actionable Advice: If a gap is found, the Strategist must suggest a specific, real-world course (e.g., "You're missing a PMP. I recommend the Google Project Management Certificate on Coursera to bridge this.")
+IV. Technical Constraints
+* State Persistence: The current "Game Mode" and conversation history must be saved in chrome.storage.local so the conversation doesn't reset if the side panel is closed.
+* Zero-Knowledge Start: The chatbot must remain in a "System Initializing" state until a resume is provided. No "placeholder" conversations.
+
+
+________________
+This module focuses on the seamless transition from raw resume data to a structured user profile, while ensuring the interface is accessible and provides clear feedback. By isolating this logic, you ensure the AI focuses on data accuracy and visual integrity without distractions from other extension features.
+________________
+The Build Prompt (Automatic Extraction & UI Fixes)
+Instructions: Paste the text below into your AI coding session to generate the logic for data extraction and the high-contrast UI.
+Persona: Act as a Principal Frontend Engineer and Data Architect. Your task is to build the Automatic Extraction Layer and UX/UI Optimization Module for the Job-Agent AI Chrome Extension.
+Task 1: The Automatic Extraction Layer
+6. Trigger: When a user uploads a resume via the FileHandler, the system must immediately extract the text and send it to Gemini.
+7. Extraction Logic: Use Gemini to parse the resume text and return a JSON object with the following keys: email, phone, portfolio_url, linkedin_url.
+8. Auto-Fill: Once the JSON is returned, programmatically populate the corresponding fields in the "Personal" tab.
+9. No Mocking: If information is missing from the resume, the JSON value must be null, and the field should remain empty (do not invent data).
+Task 2: Critical UI/UX Fixes
+1. Readability: Force all input fields (input, textarea, select) to have a white background (#FFFFFF) and dark text (#121212) to eliminate "black-on-black" unreadability issues. Use !important in CSS to override browser or dark-mode defaults.
+2. Saved Messaging: Implement a "Success Toast" notification system. Whenever a user clicks "Save Configuration" or when the Auto-Extraction finishes, show a brief (3-second) non-intrusive message at the bottom of the side panel.
+3. State Synchronization: Ensure the UI fields refresh and display the newly saved data immediately after any chrome.storage.local.set operation.
+Action: Provide the sidepanel.js logic for the extraction pass and the CSS overrides for the input fields.
+________________
+System Guidelines (Extraction & UI/UX)
+Instructions: Save this as EXTRACTION_UI_GUIDELINES.md to keep the AI's development grounded in professional standards.
+I. Data Extraction Standards
+* JSON Format: The AI must strictly follow the schema: { "email": string, "phone": string, "portfolio": string, "linkedin": string }.
+* Safety Check: If the resume contains multiple emails or phone numbers (e.g., a reference's info), the AI must prioritize the one in the header section.
+* Post-Fill Event: After filling the fields, the script must dispatch the change and input events so the application recognizes the state change.
+II. UI Accessibility & Visual Specs
+* Input Styling: * Background: #FFFFFF
+   * Text Color: #121212
+   * Border: 1px solid #D1D1D1
+   * Focus State: 2px solid #1A73E8
+* The Toast Notification:
+   * Style: Rounded corners, slight transparency (rgba(0,0,0,0.8)), white text, centered horizontally.
+   * Animation: Fade-in from the bottom.
+III. Persistence & State Logic
+* Storage Key: All personal info must be stored under the profile key in chrome.storage.local.
+* Consistency: The "Save Configuration" button should be disabled for 1 second after clicking to prevent double-submissions, then show the Toast upon success.
+________________
+Final Verification Checklist
+Use this to ensure the AI has correctly implemented these specific requests:
+* [ ] Contrast Check: Open the extension in both Light and Dark mode on your OS. Are the text fields still white with dark text?
+* [ ] Extraction Accuracy: Upload your resume. Does it correctly find your LinkedIn URL without including other social links?
+* [ ] Messaging: Does the "Changes Saved" toast appear immediately after you update your phone number?
+* [ ] State Sync: If you manually change a field and click save, does the field stay updated if you close and reopen the side panel?
+________________
+
+
+This module focuses on the automation of the most manual step in a job application: document management. By using the DataTransfer API, the extension will programmatically "inject" the user's resume into job boards, fulfilling the goal of a "Review-Only" workflow.
+________________
+The Build Prompt (Auto-Document Attachment)
+Instructions: Paste the text below into your AI coding session to generate the logic for detecting and auto-filling resume upload fields.
+Persona: Act as a Senior Browser Automation Engineer. Your task is to build the Auto-Document Attachment Module for the Job-Agent AI Chrome Extension.
+Task 1: Intelligent Field Detection
+10. Scanner: Scrape the DOM for <input type="file"> elements or custom drag-and-drop containers.
+11. Logic: Use keyword matching on id, name, aria-label, and associated <label> text. Target keywords: "Resume," "CV," "Upload Your Resume," "Attach Document."
+12. Precision: Ensure the logic distinguishes between "Resume" and other uploads like "Cover Letter" or "Portfolio."
+Task 2: Programmatic File Injection
+4. Retrieval: Fetch the stored resume binary (Blob/File) from chrome.storage.local.
+5. Injection: Since browser security prevents setting input.value for files, you must implement the DataTransfer API method:
+   * Construct a new File() object from the stored blob.
+   * Create a new DataTransfer() container.
+   * Add the file to the container.
+   * Assign the dataTransfer.files to the targeted input element.
+6. Event Triggering: Immediately dispatch the change and input events so the job board's scripts (e.g., Progress bars, "Remove File" buttons) recognize the upload.
+Task 3: State Reporting
+* Feedback: Once the file is successfully attached, trigger the "Success Toast" notification: "Resume automatically attached for review."
+Action: Provide the content.js function for file injection and the logic to find the correct upload field.
+________________
+System Guidelines (Auto-Document Attachment)
+Instructions: Save this as AUTO_UPLOAD_GUIDELINES.md to ensure the AI follows strict technical protocols.
+I. Technical Constraints (The DataTransfer API)
+* Browser Security: You cannot use element.value = "path/to/file". The AI must use the DataTransfer interface to simulate a user "dropping" a file into the input.
+* Storage Limits: Ensure the resume is stored as a Base64 string or Blob in chrome.storage.local. The background script should handle the conversion back to a File object before sending it to the content script.
+II. Detection Heuristics
+* Primary Targets: * input[type="file"]
+   * div[role="button"] (Common in custom uploaders)
+   * [dropzone="copy"]
+* Label Matching: Match labels case-insensitively. If multiple file inputs exist, prioritize the one closest to the top of the page for the "Resume."
+III. "Review-Only" Workflow Standards
+* Visibility: The attached file name must be visible to the user in the job board's UI.
+* Safety: If the AI is unsure (e.g., three identical file inputs), it must not guess. It should highlight the section in the side panel and ask: "Which field should I attach your resume to?"
+________________
+Final Verification Checklist
+Use this suite to verify the AI has successfully built the auto-upload feature:
+* [ ] Detection Check: Navigate to a job board (Greenhouse, Lever, or Workday). Does the extension identify the "Resume" upload field within 2 seconds of the page loading?
+* [ ] Injection Check: Does the file name (e.g., "LucasHammonds_Resume.pdf") appear in the job board's native "Attached File" area?
+* [ ] Event Check: Does the website's "Next" or "Submit" button become enabled after the file is auto-attached?
+* [ ] Conflict Resolution: If you have a separate "Cover Letter" stored, does the app correctly ignore the Resume input and wait for the appropriate Cover Letter field?
+
+
+
+
+
+
+________________
+This is the final, comprehensive Project Charter and Master Build Prompt (v6.0) for Job-Agent AI. It integrates the semantic automation, gamified coaching, auto-uploading, UI/UX accessibility standards, and a brand-new Onboarding "Welcome" Flow to ensure a seamless first-time user experience.
+________________
+The Master Build Prompt (v6.0)
+Instructions: Paste the text below into a high-reasoning AI (e.g., Gemini 3 Pro) to generate the complete codebase.
+Persona: Principal Software Engineer & UX Architect. Build "Job-Agent AI," a production-ready Chrome Extension (Manifest V3) that reduces job application time to 5–10 minutes via full semantic automation and an AI-driven "Welcome" experience.
+Module 1: The "Welcome Experience" Onboarding
+13. Logic: If chrome.storage.local is empty, launch a guided stepper in the Side Panel.
+14. Step 1: Secure API Key entry with a link to Google AI Studio.
+15. Step 2: Resume Upload. Trigger the FileHandler and immediate Auto-Extraction of contact info.
+16. Step 3: Profile Verification. Show the extracted data (Email, LinkedIn, Phone) and allow the user to confirm/edit.
+Module 2: Core Reasoning & Automation
+7. Age Logic: Calculate current age from DOB against Jan 16, 2026. Map to dynamic brackets (e.g., "36–45") using numerical range analysis.
+8. Employment Detector: Cross-reference current page site-name with resume history (e.g., detect "DoorDash" history).
+9. Document Attachment: Detect file inputs for "Resume" or "CV." Use the DataTransfer API to programmatically "drop" the stored resume blob into the upload field.
+Module 3: Gamified Chatbot Layer
+* Personality Routing: Audit resume for structural errors. Trigger "The Architect" (Coach) for messy resumes or "The Strategist" (Career Counselor) for clean ones to address skills gaps with Coursera/LinkedIn Learning recommendations.
+* Loop: Support in-chat re-uploads and re-audits in real-time.
+Module 4: UI/UX & Technical Execution
+* Readability: Force all inputs to white background (#FFFFFF) and dark text (#121212).
+* CORS: All AI API calls must be handled in background.js.
+* State Sync: Implement "Success Toast" notifications for every save or auto-action.
+Action: Provide the full project structure. Start by generating the manifest.json, the Onboarding Stepper logic for sidepanel.js, and the FileHandler class.
+________________
+The Developer’s Reference & Guardrail Guide
+Instructions: Save this as DEVELOPER_GUIDE.md in your project folder.
+I. The Onboarding Flow Logic
+* Key Validation: Test the API key with a simple "Hello" prompt. If it fails, do not proceed.
+* Auto-Populate: As soon as the resume is parsed, the "Personal" step in the stepper must show the extracted data to prove the AI's value immediately.
+II. Semantic Formulas
+* Age Calculation:
+$$Age = 2026 - Year_{birth} - (1 \text{ if birthday not yet reached})$$
+* Company Match: Fuzzy string search. If Current_Site $\in$ Resume.Experience, then Previous_Employee = TRUE.
+* The STAR Method: Responses must follow: Situation (10%), Task (10%), Action (60%), Result (20%).
+III. Input Handling & Auto-Attach
+   * Injection: Trigger input, change, and blur events after every fill.
+   * Auto-Upload: Use new DataTransfer() to inject the stored binary resume blob into input[type="file"] elements labeled "Resume" or "CV."
+________________
+Final Pre-Flight Testing Checklist
+Test Suite 1: The "First 60 Seconds" (Onboarding)
+   * [ ] API Setup: Does the onboarding stepper clearly guide the user to Google AI Studio?
+   * [ ] Instant Value: Does the app extract phone/email and pre-fill the stepper fields instantly upon resume upload?
+   * [ ] Readability: Are all fields white-background with high-contrast text?
+Test Suite 2: Full Automation Execution
+   * [ ] Auto-Attach: When navigating to a job board, does the resume automatically appear in the "Upload" slot?
+   * [ ] Age & History: Does it correctly pick the "36–45" bracket and identify a "Previous Employer" match?
+   * [ ] Demographics: Are all identity and legal fields filled according to the Master Profile?
+Test Suite 3: Chatbot & Strategy
+   * [ ] Personality Flip: Does the chatbot tone change based on resume quality?
+   * [ ] Skill-Gap: Does the Strategist recommend a real-world Coursera course for a missing skill found on the page?
+________________
+Chrome Web Store Developer Description
+Title: Job-Agent AI: The Automated Job Search Copilot
+Summary: Automate your job applications with Gemini 3—auto-fill forms, auto-attach resumes, and get real-time resume coaching.
+Full Description:
+Welcome to the "Review-Only" era of job searching. Job-Agent AI reduces application time to under 10 minutes by handling the data entry and document management for you.
+Key Features:
+   * Guided Onboarding: Get set up in seconds. Our AI extracts your contact info from your resume the moment you upload it.
+   * Smart Auto-Attach: Our engine finds the "Resume" upload field on any site and programmatically attaches your CV for you.
+   * Deep Semantic Reasoning: We calculate your age brackets, verify previous employment history, and map diversity data with human-level accuracy.
+   * Gamified Mentorship: "The Architect" fixes your formatting, while "The Strategist" finds skill gaps and recommends Coursera courses to make you the top candidate.
+   * Privacy-First: Your data stays on your machine. We use a local-only storage model and your personal Google AI key.
+________________
+
+
+Final Pre-Flight Testing Checklist
+Once the code is generated, the AI should be instructed to verify the following scenarios.
+Test Suite 1: Identity & Legal
+   * [ ] Age Bracket: Does "44" correctly select the "36-45" or "40-50" option?
+   * [ ] Sponsorship: If the user is a "Citizen," does it select "No" for "Will you now or in the future require sponsorship?"
+   * [ ] Demographics: Does it correctly map "Non-binary" to "Genderfluid/Other" if the exact match isn't available?
+Test Suite 2: Work History
+   * [ ] Previous Employer: If applying to a company listed on the resume, is "Have you worked here before?" set to "Yes"?
+   * [ ] STAR Responses: Does the "Tell us about a conflict" question generate a 3-5 sentence response citing a real project from the resume?
+Test Suite 3: Technical Execution
+   * [ ] CORS Check: Do API calls succeed on greenhouse.io, lever.co, and workday.com?
+   * [ ] React State: Does the "Next" button on the application activate after the AI fills the fields?
+   * [ ] Multi-Select: Does the AI correctly check multiple boxes for "Which programming languages do you know?"
+________________
+Summary of 2026 Context Provided
+   * Current Date: Friday, January 16, 2026.
+   * The "Why": AI understands brackets not as strings, but as numerical ranges ($X \dots Y$).
+   * The "How": Using Content Scripts to scrape, Background Scripts to reason via Gemini, and Sidepanels to manage state.
+Your project is now fully documented for a high-level AI build. Would you like me to generate the specific JSON Master Profile file that you can use to "prime" the extension with your own data for the first test run?

@@ -1,0 +1,5 @@
+{
+  "name": "Job-Agent AI",
+  "description": "A local-first Chrome Extension using Gemini 3 to automate complex job applications with semantic reasoning.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Job-Agent AI</title>
+
+  <style>
+    /* Custom scrollbar for sidepanel */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #888;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #555;
+    }
+
+    /* CRITICAL UI FIX: Force high contrast on inputs */
+    input,
+    select,
+    textarea {
+      background-color: #FFFFFF !important;
+      color: #121212 !important;
+      border-color: #D1D1D1;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #1A73E8 !important;
+      outline: none !important;
+      box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2) !important;
+    }
+
+    /* Ensure disabled inputs look disabled but readable */
+    input:disabled,
+    select:disabled,
+    textarea:disabled {
+      background-color: #F3F4F6 !important;
+      color: #6B7280 !important;
+    }
+  </style>
+
+
+</head>
+
+<body class="bg-gray-50 text-gray-900 antialiased">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
+</html>
