@@ -1,5 +1,13 @@
+export type LLMProvider = 'google' | 'openai' | 'anthropic';
+
 export interface UserProfile {
-  apiKey: string;
+  apiKey: string; // Legacy support (maps to google)
+  selectedProvider: LLMProvider;
+  apiKeys: {
+    google: string;
+    openai?: string;
+    anthropic?: string;
+  };
   firstName: string;
   lastName: string;
   email: string;
@@ -9,6 +17,7 @@ export interface UserProfile {
   dob: string; // YYYY-MM-DD
   address: string;
   city: string;
+  state: string;
   zip: string;
   citizenship: string; // e.g., "US Citizen", "Green Card", "Visa"
   workCountry: string; // Country intending to work from (e.g., "United States", "Canada", "Remote")
@@ -21,6 +30,17 @@ export interface UserProfile {
   resumeFileName?: string;
   resumeBlob?: string; // Base64-encoded PDF blob for auto-upload
   resumeMimeType?: string; // MIME type of the resume file (e.g., 'application/pdf')
+  applicationHistory?: ApplicationEntry[];
+}
+
+export interface ApplicationEntry {
+  id: string;
+  date: string; // ISO String
+  company: string;
+  role: string;
+  autofillTimeSeconds: number;
+  estimatedManualTimeSeconds: number;
+  status: 'applied' | 'failed' | 'in-progress';
 }
 
 export interface FormField {
@@ -79,6 +99,10 @@ export type ExtensionMessage =
 
 export const DEFAULT_PROFILE: UserProfile = {
   apiKey: '',
+  selectedProvider: 'google',
+  apiKeys: {
+    google: '',
+  },
   firstName: '',
   lastName: '',
   email: '',
@@ -88,6 +112,7 @@ export const DEFAULT_PROFILE: UserProfile = {
   dob: '',
   address: '',
   city: '',
+  state: '',
   zip: '',
   citizenship: 'US Citizen',
   workCountry: 'United States',
@@ -97,5 +122,6 @@ export const DEFAULT_PROFILE: UserProfile = {
   race: 'Prefer not to say',
   sexualOrientation: 'Prefer not to say',
   resumeText: '',
-  resumeFileName: ''
+  resumeFileName: '',
+  applicationHistory: []
 };

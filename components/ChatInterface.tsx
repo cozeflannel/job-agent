@@ -18,7 +18,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
   });
   const [input, setInput] = useState('');
   const [pageContext, setPageContext] = useState<PageContext>({ url: '', title: '' });
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -31,15 +31,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
   useEffect(() => {
     // 1. Get Context
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-       chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
-           if (tabs[0]?.id) {
-               chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PAGE_CONTEXT' }, (response: any) => {
-                   if (response && response.success) {
-                       setPageContext(response.context);
-                   }
-               });
-           }
-       });
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+        if (tabs[0]?.id) {
+          chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PAGE_CONTEXT' }, (response: any) => {
+            if (response && response.success) {
+              setPageContext(response.context);
+            }
+          });
+        }
+      });
     }
 
     // 2. Initial Audit if needed
@@ -60,21 +60,21 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
 
   const runAudit = async (text: string, previousObjective?: string) => {
     setState(prev => ({ ...prev, isThinking: true }));
-    
+
     if (previousObjective) {
-        addMessage(`Running re-evaluation against goal: "${previousObjective}"...`, 'system');
+      addMessage(`Running re-evaluation against goal: "${previousObjective}"...`, 'system');
     } else {
-        addMessage("Initializing Resume Audit System...", 'system');
+      addMessage("Initializing Resume Audit System...", 'system');
     }
 
     try {
       if (typeof chrome !== 'undefined' && chrome.runtime) {
         const response = await chrome.runtime.sendMessage({
           type: 'AUDIT_RESUME',
-          payload: { 
-              resumeText: text, 
-              apiKey: profile.apiKey,
-              previousObjective
+          payload: {
+            resumeText: text,
+            apiKey: profile.apiKey,
+            previousObjective
           }
         });
 
@@ -92,13 +92,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
       } else {
         // Dev Mock
         setTimeout(() => {
-            setState(prev => ({
-                ...prev, 
-                persona: 'ARCHITECT', 
-                objective: 'Fix 3 detected formatting errors.',
-                isThinking: false 
-            }));
-            addMessage("I've detected passive voice in your Experience section. Let's fix that.", 'ai');
+          setState(prev => ({
+            ...prev,
+            persona: 'ARCHITECT',
+            objective: 'Fix 3 detected formatting errors.',
+            isThinking: false
+          }));
+          addMessage("I've detected passive voice in your Experience section. Let's fix that.", 'ai');
         }, 1500);
       }
     } catch (e: any) {
@@ -131,15 +131,15 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
         });
 
         if (!response.success) throw new Error(response.error);
-        
+
         setState(prev => ({ ...prev, isThinking: false }));
         addMessage(response.data, 'ai');
-        
+
       } else {
-         setTimeout(() => {
-            addMessage("Dev Mode: I received your message.", 'ai');
-            setState(prev => ({ ...prev, isThinking: false }));
-         }, 1000);
+        setTimeout(() => {
+          addMessage("Dev Mode: I received your message.", 'ai');
+          setState(prev => ({ ...prev, isThinking: false }));
+        }, 1000);
       }
     } catch (e: any) {
       addMessage(`Connection Error: ${e.message}`, 'system');
@@ -157,17 +157,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
 
       // Use FileHandler to process the file
       const result = await FileHandler.handleUpload(file, profile.apiKey);
-      
-      onUpdateProfile({ 
-          ...profile, 
-          resumeText: result.text, 
-          resumeFileName: file.name 
+
+      onUpdateProfile({
+        ...profile,
+        resumeText: result.text,
+        resumeFileName: file.name
       });
 
       // Pass the audit result directly if available, or runAudit manually with the new text
       if (result.auditResult) {
-         const audit = result.auditResult;
-         setState(prev => ({
+        const audit = result.auditResult;
+        setState(prev => ({
           ...prev,
           persona: audit.persona,
           objective: audit.objective,
@@ -175,19 +175,53 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
         }));
         addMessage(audit.firstMessage, 'ai');
       } else {
-         // Fallback if audit wasn't in result (e.g. key missing?)
-         runAudit(result.text, state.objective);
+        // Fallback if audit wasn't in result (e.g. key missing?)
+        runAudit(result.text, state.objective);
       }
 
     } catch (err: any) {
-       addMessage(`Upload Failed: ${err.message}`, 'system');
-       setState(prev => ({ ...prev, isThinking: false }));
+      addMessage(`Upload Failed: ${err.message}`, 'system');
+      setState(prev => ({ ...prev, isThinking: false }));
     }
+  };
+
+  // Helper function to render text with basic markdown
+  const renderFormattedText = (text: string) => {
+    // 1. Handle Bold (**text**)
+    let formatted = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+
+    // 2. Handle Bullet points (* or - at start of line)
+    // We can wrap the whole thing in a logic that splits by newlines and checks for bullets
+    const lines = formatted.split('\n');
+    const processedLines = lines.map(line => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+        return `<li>${trimmed.substring(2)}</li>`;
+      }
+      return line;
+    });
+
+    // Join lines. If we have <li>, we might want to wrap them in <ul>, but simple replacement is safer for now 
+    // without full parser. A simple way: just return the lines with <br/>, but <li> implies block element.
+    // Let's just return the lines joined by <br/> unless it is a list item.
+    // Actually, simply replacing the start is enough for "rich text" visual if we apply some CSS or accept it's a list item.
+    // But to be proper HTML, we should wrap sequential <li> in <ul>. 
+    // For simplicity given strict guardrails: allow <li> to just be rendered. Browser renders <li> even without <ul> sometimes but better to use simple bullet char if <ul> complex.
+    // User requested "Render **text** as bold, * or - as bullet points".
+    // Let's replace the bullet marker with a bullet entity for safer rendering if not using full HTML structure.
+    // OR create a simple HTML structure.
+
+    // Let's try a safer regex approach for just the formatting asked:
+    formatted = formatted.replace(/(?:^|\n)[*-] (.*?)(?=(?:$|\n))/g, '<br/>• $1');
+
+    // Clean up any double breaks if necessary, but the above is simple.
+    // Let's use the <b> tag we created.
+    return { __html: formatted };
   };
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      
+
       {/* Objective Banner */}
       <div className={`
         p-3 shadow-sm border-b flex items-center justify-between transition-colors duration-500
@@ -218,23 +252,27 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
             key={msg.id}
             className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}
           >
-             {msg.sender === 'ai' && (
-                 <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0 mr-2 flex items-center justify-center text-xs">AI</div>
-             )}
+            {msg.sender === 'ai' && (
+              <div className="w-6 h-6 rounded-full bg-gray-200 flex-shrink-0 mr-2 flex items-center justify-center text-xs">AI</div>
+            )}
             <div
               className={`
-                max-w-[85%] rounded-lg p-3 text-sm whitespace-pre-wrap shadow-sm
-                ${msg.sender === 'user' 
-                  ? 'bg-blue-600 text-white rounded-br-none' 
+                max-w-[85%] rounded-lg p-3 text-sm shadow-sm
+                ${msg.sender === 'user'
+                  ? 'bg-blue-600 text-white rounded-br-none'
                   : msg.sender === 'system'
                     ? 'bg-gray-100 text-gray-500 text-xs text-center w-full italic border-none shadow-none'
-                    : state.persona === 'ARCHITECT' 
-                        ? 'bg-white border-l-4 border-amber-400 text-gray-800 rounded-bl-none'
-                        : 'bg-white border-l-4 border-indigo-500 text-gray-800 rounded-bl-none'
+                    : state.persona === 'ARCHITECT'
+                      ? 'bg-white border-l-4 border-amber-400 text-gray-800 rounded-bl-none'
+                      : 'bg-white border-l-4 border-indigo-500 text-gray-800 rounded-bl-none'
                 }
               `}
             >
-              {msg.text}
+              {msg.sender === 'ai' ? (
+                <div dangerouslySetInnerHTML={renderFormattedText(msg.text)} />
+              ) : (
+                <div className="whitespace-pre-wrap">{msg.text}</div>
+              )}
             </div>
           </div>
         ))}
@@ -256,21 +294,21 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
       {/* Input Area */}
       <div className="p-3 bg-white border-t border-gray-200">
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => fileInputRef.current?.click()}
             className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors border border-transparent hover:border-blue-100"
             title="Upload Revised Resume"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
           </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            className="hidden" 
-            accept=".txt,.md,.text,.pdf" 
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            accept=".txt,.md,.text,.pdf"
             onChange={handleReupload}
           />
-          
+
           <input
             type="text"
             value={input}
@@ -280,8 +318,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ profile, onUpdateP
             disabled={!profile.apiKey || state.isThinking}
             className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          
-          <button 
+
+          <button
             onClick={handleSendMessage}
             disabled={!input.trim() || state.isThinking}
             className={`p-2 text-white rounded-md transition-colors ${state.persona === 'ARCHITECT' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'} disabled:opacity-50`}

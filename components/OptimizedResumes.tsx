@@ -88,11 +88,15 @@ export const OptimizedResumes: React.FC<OptimizedResumesProps> = ({ profile, onS
                 chrome.tabs.query({ active: true, currentWindow: true }, resolve)
             );
 
-            if (!tabs[0]?.id) {
-                throw new Error('No active tab found');
+            if (!tabs[0]?.id || !tabs[0]?.url) {
+                throw new Error('No active tab found. Please open a job posting page.');
             }
 
             console.log('[OptimizedResumes] Active tab:', tabs[0].url);
+
+            if (!tabs[0].url.startsWith('http')) {
+                throw new Error('Please navigate to a valid web page (http/https) to use this feature.');
+            }
 
             // Send message to content script
             console.log('[OptimizedResumes] Requesting page context...');
@@ -101,14 +105,25 @@ export const OptimizedResumes: React.FC<OptimizedResumesProps> = ({ profile, onS
                     reject(new Error('Timeout waiting for page content. Try refreshing the page.'));
                 }, 5000);
 
-                chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PAGE_CONTEXT' }, (response) => {
+                try {
+                    chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PAGE_CONTEXT' }, (response) => {
+                        clearTimeout(timeoutId);
+                        if (chrome.runtime.lastError) {
+                            // Detect connection error specifically
+                            const msg = chrome.runtime.lastError.message;
+                            if (msg && msg.includes('Receiving end does not exist')) {
+                                reject(new Error('Please refresh the page to activate the extension.'));
+                            } else {
+                                reject(new Error(msg || 'Connection failed'));
+                            }
+                        } else {
+                            resolve(response);
+                        }
+                    });
+                } catch (e: any) {
                     clearTimeout(timeoutId);
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else {
-                        resolve(response);
-                    }
-                });
+                    reject(new Error('Failed to connect to page. Please refresh.'));
+                }
             });
 
             console.log('[OptimizedResumes] Page context response:', pageContextResponse);
@@ -141,7 +156,13 @@ export const OptimizedResumes: React.FC<OptimizedResumesProps> = ({ profile, onS
                 throw new Error(response?.error || 'AI extraction failed. Please try again or enter details manually.');
             }
 
-            const result = JSON.parse(response.data);
+            let result;
+            try {
+                result = JSON.parse(response.data);
+            } catch (e) {
+                console.error("Failed to parse extracted job details:", response.data);
+                throw new Error("Received invalid data from AI. Please try again.");
+            }
             console.log('[OptimizedResumes] Extracted data:', result);
 
             if (!result.jobTitle && !result.companyName && !result.jobDescription) {
@@ -182,8 +203,8 @@ export const OptimizedResumes: React.FC<OptimizedResumesProps> = ({ profile, onS
         setJobDescription('');
         setShowNewDocModal(true);
 
-        // DON'T auto-detect - let user click a button to do it
-        // This prevents excessive scanning
+        // Auto-detect immediately
+        setTimeout(() => handleAutoDetect(), 100);
     };
 
 
@@ -206,7 +227,12 @@ export const OptimizedResumes: React.FC<OptimizedResumesProps> = ({ profile, onS
         try {
             setIsGenerating(true);
 
-            const response = await chrome.runtime.sendMessage({
+            // Timeout after 60 seconds to prevent infinite hanging
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Optimization timed out. Validating response took too long.')), 60000);
+            });
+
+            const aiPromise = chrome.runtime.sendMessage({
                 type: 'OPTIMIZE_RESUME',
                 payload: {
                     originalResume: profile.resumeText,
@@ -216,6 +242,8 @@ export const OptimizedResumes: React.FC<OptimizedResumesProps> = ({ profile, onS
                     apiKey: profile.apiKey
                 }
             });
+
+            const response: any = await Promise.race([aiPromise, timeoutPromise]);
 
             console.log('[OptimizedResumes] Generated response:', response);
 
@@ -619,13 +647,30 @@ ${content
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
-                                <textarea
-                                    value={jobDescription}
-                                    onChange={(e) => setJobDescription(e.target.value)}
-                                    placeholder="Paste the full job description here..."
-                                    rows={12}
-                                    className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-blue-500 focus:border-blue-500 font-mono"
-                                />
+                                {jobDescription && !isDetecting ? (
+                                    <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-md">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-green-600 font-bold">✓</span>
+                                            <span className="text-sm text-gray-700">
+                                                Detected from page ({jobDescription.length} chars)
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => setJobDescription('')}
+                                            className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                        >
+                                            Clear & Edit
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <textarea
+                                        value={jobDescription}
+                                        onChange={(e) => setJobDescription(e.target.value)}
+                                        placeholder="Paste the full job description here..."
+                                        rows={12}
+                                        className="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-blue-500 focus:border-blue-500 font-mono"
+                                    />
+                                )}
                             </div>
 
                             <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-800">

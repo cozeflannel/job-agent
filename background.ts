@@ -1,9 +1,52 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { UserProfile, FormField, PageContext, ChatMessage, PersonaType } from './types';
+import { AIClient, AICompletionRequest } from './utils/AIClient';
+import { GeminiAdapter } from './services/GeminiAdapter';
+import { OpenAIAdapter } from './services/OpenAIAdapter';
+import { AnthropicAdapter } from './services/AnthropicAdapter';
 
 declare var chrome: any;
 
 const isExtension = typeof chrome !== 'undefined' && !!chrome.runtime;
+
+// Mock Type enum to maintain compatibility with existing logical flow without full dependency
+const Type = {
+  STRING: "STRING",
+  NUMBER: "NUMBER",
+  INTEGER: "INTEGER",
+  BOOLEAN: "BOOLEAN",
+  ARRAY: "ARRAY",
+  OBJECT: "OBJECT"
+};
+
+// --- Factory ---
+const getAIClient = (profile: UserProfile): AIClient => {
+  const provider = profile.selectedProvider || 'google';
+
+  // Backward compatibility: use old apiKey if google logic is active and specific key missing
+  let apiKey = '';
+
+  if (provider === 'google') {
+    apiKey = profile.apiKeys?.google || profile.apiKey;
+  } else if (provider === 'openai') {
+    apiKey = profile.apiKeys?.openai || '';
+  } else if (provider === 'anthropic') {
+    apiKey = profile.apiKeys?.anthropic || '';
+  }
+
+  if (!apiKey) {
+    throw new Error(`⚠️ Missing API Key for provider: ${provider}. Please check your Settings.`);
+  }
+
+  switch (provider) {
+    case 'openai':
+      return new OpenAIAdapter(apiKey);
+    case 'anthropic':
+      return new AnthropicAdapter(apiKey);
+    case 'google':
+    default:
+      return new GeminiAdapter(apiKey); // Default to Gemini
+  }
+};
 
 // --- Logic Engine (2026 Standards) ---
 
@@ -32,7 +75,8 @@ const generateFormSystemInstruction = (profile: UserProfile, context: PageContex
     3. Use semantic matching for demographics.
     4. Legal: Citizenship "${profile.citizenship}". Work Country: "${profile.workCountry}".
     5. For "country to work from" or "location preference" questions, use workCountry: "${profile.workCountry}".
-    6. STAR: Generate 3-5 sentence narratives from resume for behavioral qs.
+    6. IMPORTANT: If a field is labeled "Location" (and is not a full address), prefer "${profile.city}, ${profile.state}, ${profile.workCountry}" or just "${profile.city}, ${profile.state}".
+    7. STAR: Generate 3-5 sentence narratives from resume for behavioral qs.
   `;
 };
 
@@ -43,11 +87,12 @@ const generateExtractionSystemInstruction = (): string => {
     Task: Extract key personal profile information from the provided resume text.
     
     Rules:
-    1. Extract 'firstName', 'lastName', 'email', 'phone', 'portfolio', 'linkedin', 'address', 'city', 'zip'.
+    1. Extract 'firstName', 'lastName', 'email', 'phone', 'portfolio', 'linkedin', 'address', 'city', 'state', 'zip'.
     2. If a field is missing, return null. DO NOT invent placeholders.
-    3. For LinkedIn, extract the full URL.
-    4. Split full name into first and last name.
-    5. Prioritize the header section of the resume.
+    3. EMAIL: Look closely for email addresses (containing '@'). Common patterns: header, sidebar, or top contact info.
+    4. LINKEDIN: Look for 'linkedin.com/in/...' or similar. If found, return the FULL URL.
+    5. Split full name into first and last name.
+    6. Prioritize the header and contact sections of the resume.
   `;
 };
 
@@ -122,39 +167,37 @@ const generateChatSystemInstruction = (persona: PersonaType, objective: string, 
 
 const handleAnalysis = async (profile: UserProfile, fields: FormField[], context: PageContext) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: profile.apiKey });
+    const ai = getAIClient(profile);
     const prompt = `Analyze HTML fields: ${JSON.stringify(fields)}. Return JSON value mappings based on profile.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        systemInstruction: generateFormSystemInstruction(profile, context),
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              fieldId: { type: Type.STRING },
-              value: { type: Type.STRING },
-              reasoning: { type: Type.STRING }
-            }
+    const response = await ai.generateStructuredJSON({
+      systemInstruction: generateFormSystemInstruction(profile, context),
+      prompt: prompt,
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            fieldId: { type: Type.STRING },
+            value: { type: Type.STRING },
+            reasoning: { type: Type.STRING }
           }
         }
       }
     });
-    return response.text;
+    return response;
   } catch (error: any) {
     // Parse error for quota issues
     const errorMessage = error?.message || JSON.stringify(error);
 
     if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota')) {
-      throw new Error('⚠️ API Quota Exceeded: You\'ve hit the Gemini API free tier limit (20 requests/day). Please wait 24 hours or upgrade your API key at https://ai.google.dev/pricing');
+      throw new Error('⚠️ API Quota Exceeded: You\'ve hit the API limit. Please wait or upgrade your API key.');
     } else if (errorMessage.includes('401') || errorMessage.includes('UNAUTHENTICATED')) {
-      throw new Error('⚠️ Invalid API Key: Please check your Gemini API key in Settings');
+      throw new Error('⚠️ Invalid API Key: Please check your API key in Settings');
     } else if (errorMessage.includes('403') || errorMessage.includes('PERMISSION_DENIED')) {
       throw new Error('⚠️ API Access Denied: Your API key doesn\'t have permission to use this model');
+    } else if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
+      throw new Error('⚠️ AI Model Overloaded: The system is experiencing high traffic. Please try again in a moment.');
     } else {
       throw new Error(`AI Analysis Failed: ${errorMessage.substring(0, 200)}`);
     }
@@ -162,78 +205,94 @@ const handleAnalysis = async (profile: UserProfile, fields: FormField[], context
 };
 
 const handleResumeExtraction = async (resumeText: string, apiKey: string) => {
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Extract contact info from this resume:\n\n${resumeText}`,
-    config: {
-      systemInstruction: generateExtractionSystemInstruction(),
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          firstName: { type: Type.STRING, nullable: true },
-          lastName: { type: Type.STRING, nullable: true },
-          email: { type: Type.STRING, nullable: true },
-          phone: { type: Type.STRING, nullable: true },
-          portfolio: { type: Type.STRING, nullable: true },
-          linkedin: { type: Type.STRING, nullable: true },
-          address: { type: Type.STRING, nullable: true },
-          city: { type: Type.STRING, nullable: true },
-          zip: { type: Type.STRING, nullable: true }
-        }
+  // Logic where we don't have a full profile yet, assume default provider but using passed key
+  // Or since this is "handleResumeExtraction" usually called with just a key (from existing flow).
+  // We need to support this. The existing flow passed `apiKey`. 
+  // We should prob construct a temp profile or just instantiate Gemini default if unknown, 
+  // BUT the caller might only pass a string.
+  // Ideally we change signature to take UserProfile, but to minimize regressions let's assume Gemini or infer.
+  // Actually, we can assume it's a Gemini key if legacy, OR we need the profile to know provider.
+
+  // To stay safe: default to Gemini adapter with the key provided, unless we can change call site.
+  // The 'EXTENSION_MESSAGE' type has `apiKey` in payload.
+  // Let's assume Gemini for legacy direct key usage OR check if the key looks like sk- (OpenAI) or sk-ant (Anthropic).
+  // A simple heuristic for this specific function which is stateless.
+
+  let adapter: AIClient;
+  if (apiKey.startsWith('sk-ant')) {
+    adapter = new AnthropicAdapter(apiKey);
+  } else if (apiKey.startsWith('sk-')) {
+    adapter = new OpenAIAdapter(apiKey);
+  } else {
+    adapter = new GeminiAdapter(apiKey);
+  }
+
+  const response = await adapter.generateStructuredJSON({
+    prompt: `Extract contact info from this resume:\n\n${resumeText}`,
+    systemInstruction: generateExtractionSystemInstruction(),
+    responseSchema: {
+      type: Type.OBJECT,
+      properties: {
+        firstName: { type: Type.STRING, nullable: true },
+        lastName: { type: Type.STRING, nullable: true },
+        email: { type: Type.STRING, nullable: true },
+        phone: { type: Type.STRING, nullable: true },
+        portfolio: { type: Type.STRING, nullable: true },
+        linkedin: { type: Type.STRING, nullable: true },
+        address: { type: Type.STRING, nullable: true },
+        city: { type: Type.STRING, nullable: true },
+        state: { type: Type.STRING, nullable: true },
+        zip: { type: Type.STRING, nullable: true }
       }
     }
   });
-  return response.text;
+  return response;
 };
 
 const handleResumeAudit = async (resumeText: string, apiKey: string, previousObjective?: string) => {
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Audit this resume text: \n\n${resumeText}`,
-    config: {
-      systemInstruction: generateAuditSystemInstruction(previousObjective),
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          persona: { type: Type.STRING, enum: ["ARCHITECT", "STRATEGIST"] },
-          objective: { type: Type.STRING },
-          analysis: { type: Type.STRING },
-          firstMessage: { type: Type.STRING }
-        }
+  let adapter: AIClient;
+  if (apiKey.startsWith('sk-ant')) {
+    adapter = new AnthropicAdapter(apiKey);
+  } else if (apiKey.startsWith('sk-')) {
+    adapter = new OpenAIAdapter(apiKey);
+  } else {
+    adapter = new GeminiAdapter(apiKey);
+  }
+
+  const response = await adapter.generateStructuredJSON({
+    prompt: `Audit this resume text: \n\n${resumeText}`,
+    systemInstruction: generateAuditSystemInstruction(previousObjective),
+    responseSchema: {
+      type: Type.OBJECT,
+      properties: {
+        persona: { type: Type.STRING, enum: ["ARCHITECT", "STRATEGIST"] },
+        objective: { type: Type.STRING },
+        analysis: { type: Type.STRING },
+        firstMessage: { type: Type.STRING }
       }
     }
   });
-  return response.text;
+  return response;
 };
 
 const handleChat = async (message: string, history: ChatMessage[], resumeText: string, persona: PersonaType, objective: string, apiKey: string, context: PageContext) => {
-  const ai = new GoogleGenAI({ apiKey });
+  let adapter: AIClient;
+  if (apiKey.startsWith('sk-ant')) {
+    adapter = new AnthropicAdapter(apiKey);
+  } else if (apiKey.startsWith('sk-')) {
+    adapter = new OpenAIAdapter(apiKey);
+  } else {
+    adapter = new GeminiAdapter(apiKey);
+  }
 
-  // Sanitize history to ensure strict content structure
-  const cleanHistory = history
-    .filter(h => h.sender !== 'system' && h.text && h.text.trim().length > 0)
-    .map(h => ({
-      role: h.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: h.text }]
-    }));
-
-  const cleanMessage = message && message.trim().length > 0 ? message : "Study my resume.";
-
-  const contents = [...cleanHistory, { role: 'user', parts: [{ text: cleanMessage }] }];
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: contents,
-    config: {
-      systemInstruction: generateChatSystemInstruction(persona, objective, resumeText, context),
-    }
+  // Helper to ensure we pass history correctly
+  const response = await adapter.generateText({
+    prompt: message,
+    history: history,
+    systemInstruction: generateChatSystemInstruction(persona, objective, resumeText, context),
   });
 
-  return response.text;
+  return response;
 };
 
 // --- Resume Optimization System Instructions ---
@@ -343,48 +402,50 @@ const handleResumeOptimization = async (
   companyName: string,
   apiKey: string
 ) => {
-  const ai = new GoogleGenAI({ apiKey });
+  let adapter: AIClient;
+  if (apiKey.startsWith('sk-ant')) {
+    adapter = new AnthropicAdapter(apiKey);
+  } else if (apiKey.startsWith('sk-')) {
+    adapter = new OpenAIAdapter(apiKey);
+  } else {
+    adapter = new GeminiAdapter(apiKey);
+  }
 
   const prompt = `
     ORIGINAL RESUME:
     ${originalResume}
-    
+
     JOB DESCRIPTION:
     ${jobDescription}
-    
+
     Generate an optimized resume and cover letter for this specific job.
   `;
 
   console.log('[Job-Agent] Starting Resume Optimization...');
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: prompt,
-    config: {
-      systemInstruction: generateOptimizationSystemInstruction(jobTitle, companyName),
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          optimizedResume: { type: Type.STRING },
-          optimizedCoverLetter: { type: Type.STRING }
-        }
+  const response = await adapter.generateStructuredJSON({
+    prompt: prompt,
+    systemInstruction: generateOptimizationSystemInstruction(jobTitle, companyName),
+    responseSchema: {
+      type: Type.OBJECT,
+      properties: {
+        optimizedResume: { type: Type.STRING },
+        optimizedCoverLetter: { type: Type.STRING }
       }
     }
   });
 
-  const text = response.text;
-  console.log('[Job-Agent] Resume Optimization complete. Response length:', text?.length);
-  return text;
+  console.log('[Job-Agent] Resume Optimization complete. Response length:', response?.length);
+  return response;
 };
 
 // --- Job Details Extraction System Instructions ---
 const generateJobExtractionSystemInstruction = (): string => {
   return `
     You are a Job Posting Parser specializing in extracting structured information from web pages.
-    
+
     TASK: Extract job posting details from the provided page content.
-    
+
     RULES:
     1. Identify the job title - the main position being advertised
     2. Identify the company name - the organization hiring
@@ -393,14 +454,14 @@ const generateJobExtractionSystemInstruction = (): string => {
     5. Be intelligent about what constitutes the "job description" - include everything a candidate would need to know
     6. Remove navigation elements, headers, footers, and unrelated page content
     7. Keep the job description comprehensive but clean
-    
+
     EXAMPLES OF VALID PAGES:
     - LinkedIn job postings
     - Company career pages
     - Indeed, Glassdoor, etc.
     - Greenhouse, Lever, Ashby application pages
     - Direct employer job boards
-    
+
     EXAMPLES OF INVALID PAGES:
     - General company homepages
     - About pages
@@ -410,7 +471,15 @@ const generateJobExtractionSystemInstruction = (): string => {
 };
 
 const handleJobDetailsExtraction = async (pageContent: string, apiKey: string) => {
-  const ai = new GoogleGenAI({ apiKey });
+  let adapter: AIClient;
+  // Heuristic detection
+  if (apiKey.startsWith('sk-ant')) {
+    adapter = new AnthropicAdapter(apiKey);
+  } else if (apiKey.startsWith('sk-')) {
+    adapter = new OpenAIAdapter(apiKey);
+  } else {
+    adapter = new GeminiAdapter(apiKey);
+  }
 
   // Truncate page content if it's too long (keep first ~8000 chars)
   const truncatedContent = pageContent.length > 8000
@@ -419,31 +488,130 @@ const handleJobDetailsExtraction = async (pageContent: string, apiKey: string) =
 
   const prompt = `
     Analyze this web page content and extract job posting details:
-    
+
     PAGE CONTENT:
     ${truncatedContent}
-    
+
     Extract the job title, company name, and full job description.
   `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: prompt,
-    config: {
-      systemInstruction: generateJobExtractionSystemInstruction(),
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          jobTitle: { type: Type.STRING, nullable: true },
-          companyName: { type: Type.STRING, nullable: true },
-          jobDescription: { type: Type.STRING, nullable: true }
+  const response = await adapter.generateStructuredJSON({
+    prompt: prompt,
+    systemInstruction: generateJobExtractionSystemInstruction(),
+    responseSchema: {
+      type: Type.OBJECT,
+      properties: {
+        jobTitle: { type: Type.STRING, nullable: true },
+        companyName: { type: Type.STRING, nullable: true },
+        jobDescription: { type: Type.STRING, nullable: true }
+      }
+    }
+  });
+
+  return response;
+};
+
+// --- Skills Gap Analysis System Instructions ---
+const generateSkillsGapSystemInstruction = (): string => {
+  return `
+    You are a Career Growth & Skills Gap Analysis Expert.
+    
+    TASK: Compare the User's Resume against the provided Job Description.
+    
+    GOAL: 
+    1. Identify critical skills missing from the resume that are required by the job.
+    2. Provide a thorough analysis of how well the user fits the role.
+    3. Recommend specific Coursera courses to fill those gaps.
+    
+    CRITICAL RULE:
+    - You MUST provide at least 3 relevant Coursera course recommendations.
+    - USE GOOGLE SEARCH to find actual, live Coursera courses that match the skills gap.
+    - Provide the REAL URL for the course.
+    - If specific courses aren't obvious, recommend highly-rated general courses for the missing skills.
+    - Do not return an empty courses array.
+
+    OUTPUT STRUCTURE (JSON):
+    {
+      "analysis": "A detailed 2-3 paragraph analysis of the fit. Highlight strengths but focus on explaining the specific gaps and why they matter for this role.",
+      "gaps": [
+        {
+          "skill": "Name of the missing skill (e.g., 'AWS', 'Python', 'Agile')",
+          "importance": "High" | "Medium" | "Low",
+          "explanation": "Why this skill is needed based on the JD."
+        }
+      ],
+      "courses": [
+        {
+          "title": "Exact title of a relevant Coursera course",
+          "provider": "University or Organization (e.g., 'IBM', 'Google', 'Yale')",
+          "url": "The actual URL to the course on Coursera (e.g., 'https://www.coursera.org/learn/...')",
+          "description": "A brief high-level description of what the course covers",
+          "reasoning": "How this specific course addresses the identified gap."
+        }
+      ]
+    }
+  `;
+};
+
+const handleSkillsGapAnalysis = async (resumeText: string, jobDescription: string, apiKey: string) => {
+  let adapter: AIClient;
+  if (apiKey.startsWith('sk-ant')) {
+    adapter = new AnthropicAdapter(apiKey);
+  } else if (apiKey.startsWith('sk-')) {
+    adapter = new OpenAIAdapter(apiKey);
+  } else {
+    adapter = new GeminiAdapter(apiKey);
+  }
+
+  const prompt = `
+    RESUME:
+    ${resumeText}
+
+    JOB DESCRIPTION:
+    ${jobDescription}
+
+    Perform a skills gap analysis and recommend Coursera courses.
+  `;
+
+  console.log('[Job-Agent] Starting Skills Gap Analysis...');
+
+  const response = await adapter.generateStructuredJSON({
+    prompt: prompt,
+    systemInstruction: generateSkillsGapSystemInstruction(),
+    enableSearch: true, // Enable Google Search grounding
+    responseSchema: {
+      type: Type.OBJECT,
+      properties: {
+        analysis: { type: Type.STRING },
+        gaps: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              skill: { type: Type.STRING },
+              importance: { type: Type.STRING },
+              explanation: { type: Type.STRING }
+            }
+          }
+        },
+        courses: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              provider: { type: Type.STRING },
+              url: { type: Type.STRING },
+              description: { type: Type.STRING },
+              reasoning: { type: Type.STRING }
+            }
+          }
         }
       }
     }
   });
 
-  return response.text;
+  return response;
 };
 
 // --- Message Router ---
@@ -501,6 +669,15 @@ if (isExtension) {
     if (request.type === 'EXTRACT_JOB_DETAILS') {
       const { pageContent, apiKey } = request.payload;
       handleJobDetailsExtraction(pageContent, apiKey)
+        .then(data => sendResponse({ success: true, data }))
+        .catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
+    // 7. Skills Gap Analysis
+    if (request.type === 'ANALYZE_SKILLS_GAP') {
+      const { resumeText, jobDescription, apiKey } = request.payload;
+      handleSkillsGapAnalysis(resumeText, jobDescription, apiKey)
         .then(data => sendResponse({ success: true, data }))
         .catch(err => sendResponse({ success: false, error: err.message }));
       return true;

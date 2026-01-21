@@ -9,7 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@google/genai": "^1.37.0",
+    "openai": "^6.16.0",
     "pdfjs-dist": "3.11.174",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"

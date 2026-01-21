@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Settings } from './components/Settings';
 import { JobFiller } from './components/JobFiller';
-import { ChatInterface } from './components/ChatInterface';
+import { ResumeHub } from './components/ResumeHub';
+import { CareerDev } from './components/CareerDev';
 import { UserProfile, DEFAULT_PROFILE } from './types';
 
 declare var chrome: any;
 
+type MainTab = 'resume-hub' | 'auto-fill' | 'career-dev' | 'config';
+
 function App() {
-  const [activeTab, setActiveTab] = useState<'filler' | 'chat' | 'settings'>('chat');
+  const [activeTab, setActiveTab] = useState<MainTab>('resume-hub');
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [loading, setLoading] = useState(true);
 
@@ -53,7 +56,7 @@ function App() {
   if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
 
   return (
-    <div className="w-full h-screen flex flex-col font-sans text-gray-900">
+    <div className="w-full h-screen flex flex-col font-sans text-gray-900 bg-gray-50">
       {/* Header */}
       <header className="flex-none bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center shadow-sm z-10">
         <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -62,20 +65,26 @@ function App() {
         </h1>
         <div className="flex bg-gray-100 rounded-lg p-1">
           <button
-            onClick={() => setActiveTab('filler')}
-            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${activeTab === 'filler' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
+            onClick={() => setActiveTab('resume-hub')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${activeTab === 'resume-hub' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
           >
-            Fill
+            Resume Hub
           </button>
           <button
-            onClick={() => setActiveTab('chat')}
-            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${activeTab === 'chat' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
+            onClick={() => setActiveTab('auto-fill')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${activeTab === 'auto-fill' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
           >
-            Coach
+            Auto-Fill
           </button>
           <button
-            onClick={() => setActiveTab('settings')}
-            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${activeTab === 'settings' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
+            onClick={() => setActiveTab('career-dev')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${activeTab === 'career-dev' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
+          >
+            Career Dev
+          </button>
+          <button
+            onClick={() => setActiveTab('config')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${activeTab === 'config' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
           >
             Config
           </button>
@@ -84,13 +93,16 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden relative">
-        {activeTab === 'filler' && (
-          <JobFiller profile={profile} />
+        {activeTab === 'resume-hub' && (
+          <ResumeHub profile={profile} onSave={handleSaveProfile} />
         )}
-        {activeTab === 'chat' && (
-          <ChatInterface profile={profile} onUpdateProfile={handleSaveProfile} />
+        {activeTab === 'auto-fill' && (
+          <JobFiller profile={profile} onUpdateProfile={handleSaveProfile} />
         )}
-        {activeTab === 'settings' && (
+        {activeTab === 'career-dev' && (
+          <CareerDev profile={profile} onUpdateProfile={handleSaveProfile} />
+        )}
+        {activeTab === 'config' && (
           <Settings profile={profile} onSave={handleSaveProfile} />
         )}
       </main>
