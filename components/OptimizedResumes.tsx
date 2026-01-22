@@ -224,6 +224,16 @@ export const OptimizedResumes: React.FC<OptimizedResumesProps> = ({ profile, onS
             return;
         }
 
+        // --- EFFICIENCY LOOP: Check Cache ---
+        const cachedDoc = documents.find(d => d.jobDescription.trim() === jobDescription.trim());
+        if (cachedDoc) {
+            triggerToast('⚡ Loaded result from cache (Efficiency Loop)');
+            setShowNewDocModal(false);
+            // Optional: Scroll to it or highlight it. For now, just stopping is enough.
+            return;
+        }
+        // ------------------------------------
+
         try {
             setIsGenerating(true);
 
@@ -423,11 +433,12 @@ ${content
             resumeText: doc.optimizedResume,
             resumeBlob: base64Resume, // This is crucial for the contentScript injectResumeFile
             resumeFileName: fileName,
-            resumeMimeType: 'text/plain'
+            resumeMimeType: 'text/plain',
+            coverLetterText: doc.optimizedCoverLetter // Save cover letter for autofill
         };
         onSave(updatedProfile);
 
-        triggerToast('✅ Resume replaced - now using optimized version for autofill');
+        triggerToast('✅ Resume & Cover Letter active for autofill');
     };
 
     const handleDelete = (id: string) => {

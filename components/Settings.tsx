@@ -86,7 +86,7 @@ export const Settings: React.FC<SettingsProps> = ({ profile, onSave }) => {
                 placeholder="AIza..."
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
               />
-              <p className="text-xs text-gray-500 mt-1">Required for Gemini 2.0 / 3.0 models.</p>
+              <p className="mt-1 text-xs text-blue-500">Required for Gemini 3.0 models.</p>
             </div>
           )}
 

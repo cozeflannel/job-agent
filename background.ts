@@ -3,6 +3,7 @@ import { AIClient, AICompletionRequest } from './utils/AIClient';
 import { GeminiAdapter } from './services/GeminiAdapter';
 import { OpenAIAdapter } from './services/OpenAIAdapter';
 import { AnthropicAdapter } from './services/AnthropicAdapter';
+import { RemoteLogger } from './utils/RemoteLogger';
 
 declare var chrome: any;
 
@@ -75,8 +76,10 @@ const generateFormSystemInstruction = (profile: UserProfile, context: PageContex
     3. Use semantic matching for demographics.
     4. Legal: Citizenship "${profile.citizenship}". Work Country: "${profile.workCountry}".
     5. For "country to work from" or "location preference" questions, use workCountry: "${profile.workCountry}".
-    6. IMPORTANT: If a field is labeled "Location" (and is not a full address), prefer "${profile.city}, ${profile.state}, ${profile.workCountry}" or just "${profile.city}, ${profile.state}".
-    7. STAR: Generate 3-5 sentence narratives from resume for behavioral qs.
+    6. IMPORTANT: If a field is labeled "Location" (and is not a full address), prefer "City, Full State Name, Country" (e.g., "Matthews, North Carolina, United States"). EXPAND abbreviations (NC -> North Carolina).
+    7. DROPDOWNS: If a field is a dropdown/select, YOU MUST choose one of the EXACT options provided. For "Have you worked here before?", do not just say "Yes" if the options are sentences like "I am a previous employee". Map your answer to the closest available option.
+    8. STAR: Generate 3-5 sentence narratives from resume for behavioral qs.
+    9. COVER LETTER: Use the 'coverLetterText' in the profile to answer "Why do you want this job?" or "Cover Letter" text fields. Adapt the tone to fit the question.
   `;
 };
 
@@ -471,6 +474,8 @@ const generateJobExtractionSystemInstruction = (): string => {
 };
 
 const handleJobDetailsExtraction = async (pageContent: string, apiKey: string) => {
+  RemoteLogger.log('[Job-Agent] handleJobDetailsExtraction started. Page content length:', pageContent.length);
+
   let adapter: AIClient;
   // Heuristic detection
   if (apiKey.startsWith('sk-ant')) {
@@ -486,6 +491,8 @@ const handleJobDetailsExtraction = async (pageContent: string, apiKey: string) =
     ? pageContent.substring(0, 8000) + "... [content truncated]"
     : pageContent;
 
+  RemoteLogger.log('[Job-Agent] Content prepared. Truncated length:', truncatedContent.length);
+
   const prompt = `
     Analyze this web page content and extract job posting details:
 
@@ -495,20 +502,31 @@ const handleJobDetailsExtraction = async (pageContent: string, apiKey: string) =
     Extract the job title, company name, and full job description.
   `;
 
-  const response = await adapter.generateStructuredJSON({
-    prompt: prompt,
-    systemInstruction: generateJobExtractionSystemInstruction(),
-    responseSchema: {
-      type: Type.OBJECT,
-      properties: {
-        jobTitle: { type: Type.STRING, nullable: true },
-        companyName: { type: Type.STRING, nullable: true },
-        jobDescription: { type: Type.STRING, nullable: true }
+  try {
+    RemoteLogger.log('[Job-Agent] Sending request to AI Provider...');
+    const response = await adapter.generateStructuredJSON({
+      prompt: prompt,
+      systemInstruction: generateJobExtractionSystemInstruction(),
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          jobTitle: { type: Type.STRING, nullable: true },
+          companyName: { type: Type.STRING, nullable: true },
+          jobDescription: { type: Type.STRING, nullable: true }
+        }
       }
-    }
-  });
+    });
+    RemoteLogger.log('[Job-Agent] AI Response received successfully.');
 
-  return response;
+    if (!response || Object.keys(response).length === 0 || (response.jobTitle === null && response.companyName === null && response.jobDescription === null)) {
+      throw new Error("AI returned empty or invalid response for job details.");
+    }
+
+    return response;
+  } catch (error) {
+    RemoteLogger.error('[Job-Agent] Job Details Extraction Error:', error);
+    throw error;
+  }
 };
 
 // --- Skills Gap Analysis System Instructions ---
@@ -667,10 +685,17 @@ if (isExtension) {
 
     // 6. Job Details Extraction (Auto-detect from page)
     if (request.type === 'EXTRACT_JOB_DETAILS') {
+      RemoteLogger.log('[Job-Agent] Received EXTRACT_JOB_DETAILS request');
       const { pageContent, apiKey } = request.payload;
       handleJobDetailsExtraction(pageContent, apiKey)
-        .then(data => sendResponse({ success: true, data }))
-        .catch(err => sendResponse({ success: false, error: err.message }));
+        .then(data => {
+          RemoteLogger.log('[Job-Agent] Sending successful extraction response');
+          sendResponse({ success: true, data });
+        })
+        .catch(err => {
+          RemoteLogger.error('[Job-Agent] Sending extraction error:', err.message);
+          sendResponse({ success: false, error: err.message });
+        });
       return true;
     }
 

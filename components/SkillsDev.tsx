@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types';
+import { RemoteLogger } from '../utils/RemoteLogger';
 
 declare var chrome: any;
 
@@ -44,6 +45,7 @@ export const SkillsDev: React.FC<SkillsDevProps> = ({ profile }) => {
 
             if (pageContextResponse?.success && pageContextResponse.context?.pageText) {
                 // Extract Job Details
+                RemoteLogger.log("Sending EXTRACT_JOB_DETAILS message", { pageContentLength: pageContextResponse.context.pageText.length });
                 const extractionResponse = await chrome.runtime.sendMessage({
                     type: 'EXTRACT_JOB_DETAILS',
                     payload: {
@@ -51,9 +53,17 @@ export const SkillsDev: React.FC<SkillsDevProps> = ({ profile }) => {
                         apiKey: profile.apiKey
                     }
                 });
+                RemoteLogger.log("Received EXTRACT_JOB_DETAILS response", extractionResponse);
 
                 if (extractionResponse?.success) {
-                    const details = JSON.parse(extractionResponse.data);
+                    let details;
+                    try {
+                        details = JSON.parse(extractionResponse.data);
+                    } catch (parseError) {
+                        RemoteLogger.error("Failed to parse extraction response data:", extractionResponse.data);
+                        throw new Error("Received invalid data format from extraction service.");
+                    }
+
                     if (!details.jobDescription) {
                         throw new Error("Could not detect a job description on this page.");
                     }
@@ -67,21 +77,53 @@ export const SkillsDev: React.FC<SkillsDevProps> = ({ profile }) => {
                     setStatus('analyzing');
                     await analyzeGap(details.jobDescription);
                 } else {
-                    throw new Error("Failed to extract job details.");
+                    RemoteLogger.error("Extraction failed. Response:", extractionResponse);
+                    throw new Error(extractionResponse?.error || "Failed to extract job details. No specific error returned.");
                 }
             } else {
                 throw new Error("Could not read page content. Please ensure you are on a job page.");
             }
 
         } catch (e: any) {
-            console.error(e);
+            RemoteLogger.error("Auto detect failure", e);
             setErrorMsg(e.message);
             setStatus('error');
         }
     };
 
+    // Helper for hashing
+    const generateHash = (str: string): string => {
+        let hash = 0;
+        if (str.length === 0) return hash.toString();
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash.toString();
+    };
+
     const analyzeGap = async (jobDescription: string) => {
+        const jdHash = generateHash(jobDescription);
+
         try {
+            // --- EFFICIENCY LOOP: Check Cache ---
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                const result = await new Promise<any>((resolve) => {
+                    chrome.storage.local.get(['skillsGapCache'], (res) => {
+                        resolve(res.skillsGapCache || {});
+                    });
+                });
+
+                if (result[jdHash]) {
+                    console.log('⚡ Loaded skills gap from cache');
+                    setAnalysisResult(result[jdHash]);
+                    setStatus('complete');
+                    return;
+                }
+            }
+            // ------------------------------------
+
             const response = await chrome.runtime.sendMessage({
                 type: 'ANALYZE_SKILLS_GAP',
                 payload: {
@@ -97,17 +139,30 @@ export const SkillsDev: React.FC<SkillsDevProps> = ({ profile }) => {
                     try {
                         data = JSON.parse(data);
                     } catch (e) {
-                        // keep as string if parse fails (unlikely with structured output)
-                        console.error('Parse error', e);
+                        // keep as string if parse fails
+                        console.error('Parse error', e); // local parse error, keep console or remote? Remote is better.
+                        RemoteLogger.error('Parse error during skills gap', e);
                     }
                 }
                 setAnalysisResult(data);
+
+                // --- Save to Cache ---
+                if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                    chrome.storage.local.get(['skillsGapCache'], (res) => {
+                        const cache = res.skillsGapCache || {};
+                        // Limit cache size? For now, unlimited logic is fine, maybe truncate if > 50
+                        const newCache = { ...cache, [jdHash]: data };
+                        chrome.storage.local.set({ skillsGapCache: newCache });
+                    });
+                }
+                // ---------------------
+
                 setStatus('complete');
             } else {
                 throw new Error(response?.error || "Analysis failed.");
             }
         } catch (e: any) {
-            console.error(e);
+            RemoteLogger.error("Gap analysis failure", e);
             setErrorMsg(e.message);
             setStatus('error');
         }

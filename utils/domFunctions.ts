@@ -184,6 +184,7 @@ export const getAllFormFields = (root: Document | ShadowRoot = document): FormFi
         const element = el as any;
 
         if (element.type === 'hidden') return;
+        if (element.type === 'file') return; // Exclude file inputs - handled by injection agents
         const computedStyle = window.getComputedStyle(element);
         if (computedStyle.display === 'none' && computedStyle.visibility === 'hidden') return;
 
@@ -264,6 +265,7 @@ export const fillField = (fieldId: string, value: any) => {
     if (!element) element = document.querySelector(`[name="${fieldId}"]`) as any;
     if (!element) element = document.querySelector(`[data-field-id="${fieldId}"]`) as any;
     if (!element) return;
+    if (element.type === 'file') return; // Safety: Never try to set text value on file input
 
     // --- CHECK 1: Ashby Location Field ---
     if (fieldId.toLowerCase().includes('location') || element.getAttribute('placeholder')?.toLowerCase().includes('location')) {
@@ -386,6 +388,73 @@ export const injectResumeFile = (resumeText: string, fileName: string): boolean 
         return true;
     } catch (e) {
         console.error("Job-Agent: File injection failed", e);
+        return false;
+    }
+};
+
+const findCoverLetterUploadField = (): HTMLInputElement | null => {
+    // 1. Ashby Check (Hypothetical ID based on patterns)
+    const ashbyInput = document.getElementById('_systemfield_cover_letter') as HTMLInputElement;
+    if (ashbyInput) return ashbyInput;
+
+    const inputs = Array.from(document.querySelectorAll('input[type="file"]')) as HTMLInputElement[];
+    const positiveKeywords = ['cover letter', 'coverletter', 'cl_upload', 'additional documents'];
+    const negativeKeywords = ['resume', 'cv', 'curriculum vitae', 'photo', 'transcript', 'headshot'];
+
+    let bestInput = null;
+    let maxScore = 0;
+
+    inputs.forEach(input => {
+        let score = 0;
+        score += getRelevanceScore(input.id || '', positiveKeywords, negativeKeywords);
+        score += getRelevanceScore(input.name || '', positiveKeywords, negativeKeywords);
+        score += getRelevanceScore(input.getAttribute('aria-label') || '', positiveKeywords, negativeKeywords);
+        if (input.id) {
+            const label = document.querySelector(`label[for="${input.id}"]`);
+            if (label) score += getRelevanceScore(label.textContent || '', positiveKeywords, negativeKeywords);
+        }
+        if (input.parentElement) {
+            score += getRelevanceScore(input.parentElement.innerText || '', positiveKeywords, negativeKeywords);
+        }
+        if (score > maxScore) {
+            maxScore = score;
+            bestInput = input;
+        }
+    });
+
+    return bestInput;
+};
+
+export const injectCoverLetterFile = (coverLetterText: string, fileName: string): boolean => {
+    const input = findCoverLetterUploadField();
+    if (!input) {
+        console.log("Job-Agent: No cover letter file input found.");
+        return false;
+    }
+
+    try {
+        const file = new File([coverLetterText], fileName, { type: 'text/plain' });
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+
+        // --- React Hack ---
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files');
+        const nativeSetter = descriptor?.set;
+        if (nativeSetter) {
+            nativeSetter.call(input, dataTransfer.files);
+        } else {
+            input.files = dataTransfer.files;
+        }
+        // ------------------
+
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('blur', { bubbles: true }));
+
+        console.log(`Job-Agent: Attached Cover Letter ${fileName} to input #${input.id || input.name}`);
+        return true;
+    } catch (e) {
+        console.error("Job-Agent: Cover Letter injection failed", e);
         return false;
     }
 };

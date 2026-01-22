@@ -30,6 +30,7 @@ export interface UserProfile {
   resumeFileName?: string;
   resumeBlob?: string; // Base64-encoded PDF blob for auto-upload
   resumeMimeType?: string; // MIME type of the resume file (e.g., 'application/pdf')
+  coverLetterText?: string; // The active cover letter text for autofill
   applicationHistory?: ApplicationEntry[];
 }
 
