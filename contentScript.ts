@@ -878,10 +878,17 @@ const fillFieldOnPage = (fieldId: string, value: any): boolean => {
             return true;
         }
 
-        // --- CHECK 3: Greenhouse Combobox ---
-        const isCombobox = element.getAttribute('role') === 'combobox';
+        // [UPDATE] Combobox Strategy
+        const isCombobox = element.getAttribute('role') === 'combobox' || element.classList.contains('select__control');
         if (isCombobox) {
-            return fillGreenhouseCombobox(element as HTMLInputElement, String(value));
+            // Check if it's Greenhouse specifically, or just use generic if generic is robust enough
+            if (fieldId.includes('greenhouse')) {
+                return fillGreenhouseCombobox(element as HTMLInputElement, String(value));
+            } else {
+                // CALL THE NEW FUNCTION
+                fillGenericCombobox(element, String(value));
+                return true;
+            }
         }
 
         // --- STANDARD FILL ---
@@ -913,6 +920,70 @@ const fillFieldOnPage = (fieldId: string, value: any): boolean => {
         return true;
     } catch (e) {
         console.error(`Job-Agent: Failed to fill field #${fieldId}`, e);
+        return false;
+    }
+};
+
+const fillGenericCombobox = async (input: HTMLElement, targetValue: string): Promise<boolean> => {
+
+    console.log(`[Job-Agent] Attempting Generic Combobox fill for: "${targetValue}"`);
+
+    try {
+
+        // 1. Focus and Click to wake up the component
+        input.focus();
+        input.click();
+
+        // 2. Type partial text to filter (if input tag)
+        if (input.tagName === 'INPUT') {
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            if (nativeSetter) {
+                nativeSetter.call(input, targetValue);
+            } else {
+                (input as HTMLInputElement).value = targetValue;
+            }
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        // 3. Wait for options to render
+        await new Promise(resolve => setTimeout(resolve, 600));
+
+        // 4. Find the listbox/menu
+        // Common selectors for React-Select, MUI, and standard ARIA combos
+        const potentialLists = document.querySelectorAll('[role="listbox"], .select__menu, .select__menu-list, [class*="menu"], [class*="dropdown"]');
+
+        let foundMatch: HTMLElement | null = null;
+
+        // Helper to check text match
+        const isMatch = (text: string) => text && text.toLowerCase().includes(targetValue.toLowerCase());
+
+        // Search through visible lists
+        for (const list of Array.from(potentialLists)) {
+            // fast check: is this list actually visible?
+            if (list.getBoundingClientRect().height === 0) continue;
+
+            const options = Array.from(list.querySelectorAll('[role="option"], [class*="option"], li, div'));
+
+            // Strategy 1: Exact/Fuzzy Text Match on Option Text
+            foundMatch = options.find(opt => isMatch(opt.textContent || '')) as HTMLElement;
+
+            if (foundMatch) break;
+        }
+
+        // 5. Click the match
+        if (foundMatch) {
+            console.log(`[Job-Agent] Clicked option: "${foundMatch.textContent}"`);
+            foundMatch.click();
+            return true;
+        }
+
+        // Fallback: If no option found, try hitting Enter
+        console.warn(`[Job-Agent] No dropdown option found for "${targetValue}". Hitting Enter.`);
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        return true;
+
+    } catch (e) {
+        console.error("Generic Combobox fill failed", e);
         return false;
     }
 };
